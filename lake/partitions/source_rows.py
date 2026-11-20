@@ -7,6 +7,12 @@ class SourceRow:
     liters: int
 
 
+@dataclass(frozen=True, slots=True)
+class SourcePlacement:
+    batch_id: str
+    ordinal: int
+
+
 def require_name(value, field):
     if not isinstance(value, str) or not value or value.strip() != value or '\0' in value:
         raise ValueError(f'{field} must be a nonempty identifier without surrounding whitespace or NUL')
@@ -69,6 +75,26 @@ def insert_source_rows(db, batch_id, rows):
         'INSERT INTO volume.source_rows (row_id, batch_id, ordinal, liters) VALUES (?, ?, ?, ?)',
         ((row.row_id, batch_id, position, encode_liters(row.liters)) for position, row in enumerate(rows)),
     )
+
+
+def insert_moved_row(db, row_id, batch_id, ordinal, liters, schema='volume'):
+    db.execute(
+        f'INSERT INTO {schema}.source_rows (row_id, batch_id, ordinal, liters) VALUES (?, ?, ?, ?)',
+        (row_id, batch_id, ordinal, encode_liters(liters)),
+    )
+
+
+def moved_row_batch(fact_id):
+    # User identifiers never contain NUL, so this placement batch cannot collide
+    # with a real batch even when a row returns to a volume it visited before.
+    return f'\0move\0{fact_id}'
+
+
+def read_source_placement(db, row_id, schema='volume'):
+    record = db.execute(
+        f'SELECT batch_id, ordinal FROM {schema}.source_rows WHERE row_id = ?', (row_id,),
+    ).fetchone()
+    return SourcePlacement(*record) if record is not None else None
 
 
 def read_batch_source_rows(db, batch_id):

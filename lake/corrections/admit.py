@@ -1,7 +1,8 @@
 from lake.cold.checks import check_volume_binding
 from lake.cold.coverage import advance_coverage
 from lake.corrections.commits import confirm_fact
-from lake.corrections.current_rows import find_current_row, matches_before_image, update_current_row
+from lake.corrections.current_rows import matches_before_image, update_current_row
+from lake.corrections.origins import find_present_row
 from lake.corrections.receipts import (
     CorrectionReceipt, correction_fingerprint, find_correction_receipt, store_correction_receipt,
 )
@@ -26,6 +27,13 @@ class MissingRow(LookupError):
     pass
 
 
+class _Relocated(RuntimeError):
+    pass
+
+
+_ATTACH_ATTEMPTS = 8
+
+
 def _replay(db, request_id, fingerprint):
     existing = find_correction_receipt(db, request_id)
     if existing is None:
@@ -34,6 +42,13 @@ def _replay(db, request_id, fingerprint):
     if stored_fingerprint != fingerprint:
         raise CorrectionConflict(f'correction request differs: {request_id}')
     return receipt
+
+
+def _preflight_partition(db, partition_id, row_id):
+    current = find_present_row(db, partition_id, row_id)
+    if current is None:
+        return partition_id
+    return current.partition_id
 
 
 def correct_row(warehouse, request_id, partition_id, row_id, expected_liters, replacement_liters):
@@ -48,34 +63,43 @@ def correct_row(warehouse, request_id, partition_id, row_id, expected_liters, re
     previous = _replay(db, request_id, fingerprint)
     if previous is not None:
         return previous
-
-    binding = lookup_partition(db, partition_id)
-    with warehouse.volumes.attach_volume(db, binding.volume_ref):
-        with write_transaction(db, 'correct_row', warehouse.before_commit):
-            previous = _replay(db, request_id, fingerprint)
-            if previous is not None:
-                return previous
-            current = find_current_row(db, partition_id, row_id)
-            if current is None or not current.present:
-                raise MissingRow(f'{partition_id}/{row_id}')
-            if not matches_before_image(current, expected_liters):
-                raise StaleBeforeImage(f'{partition_id}/{row_id}')
-            check_volume_binding(db, partition_id, binding.volume_ref, attached=True)
-            before = warehouse.volumes.read_current_value(db, row_id)
-            if before != expected_liters:
-                raise RuntimeError('current row digest and volume value disagree')
-
-            fact = confirm_fact(db, 'correction', request_id, partition_id)
-            deleted = replacement_liters is None
-            if deleted:
-                warehouse.volumes.delete_current_row(db, row_id)
-            else:
-                warehouse.volumes.replace_current_value(db, row_id, replacement_liters)
-            update_current_row(db, current, replacement_liters, fact.fact_id)
-            advance_coverage(db, fact.fact_id)
-            delta = correction_delta(before, replacement_liters, read_threshold(db))
-            apply_delta(db, partition_id, delta)
-            append_delta(db, fact.fact_id, delta)
-            receipt = CorrectionReceipt(request_id, partition_id, row_id, fact.fact_id, deleted)
-            store_correction_receipt(db, receipt, fingerprint, current.digest)
-            return receipt
+    lookup_partition(db, partition_id)
+    for _ in range(_ATTACH_ATTEMPTS):
+        candidate = _preflight_partition(db, partition_id, row_id)
+        binding = lookup_partition(db, candidate)
+        try:
+            with warehouse.volumes.attach_volume(db, binding.volume_ref):
+                with write_transaction(db, 'correct_row', warehouse.before_commit):
+                    previous = _replay(db, request_id, fingerprint)
+                    if previous is not None:
+                        return previous
+                    current = find_present_row(db, partition_id, row_id)
+                    if current is None:
+                        raise MissingRow(f'{partition_id}/{row_id}')
+                    if current.partition_id != candidate:
+                        raise _Relocated(f'{partition_id}/{row_id}')
+                    if not matches_before_image(current, expected_liters):
+                        raise StaleBeforeImage(f'{partition_id}/{row_id}')
+                    check_volume_binding(db, current.partition_id, binding.volume_ref, attached=True)
+                    before = warehouse.volumes.read_current_value(db, current.row_id)
+                    if before != expected_liters:
+                        raise RuntimeError('current row digest and volume value disagree')
+                    fact = confirm_fact(db, 'correction', request_id, current.partition_id)
+                    deleted = replacement_liters is None
+                    if deleted:
+                        warehouse.volumes.delete_current_row(db, current.row_id)
+                    else:
+                        warehouse.volumes.replace_current_value(db, current.row_id, replacement_liters)
+                    update_current_row(db, current, replacement_liters, fact.fact_id)
+                    advance_coverage(db, fact.fact_id)
+                    delta = correction_delta(before, replacement_liters, read_threshold(db))
+                    apply_delta(db, current.partition_id, delta)
+                    append_delta(db, fact.fact_id, delta)
+                    receipt = CorrectionReceipt(request_id, partition_id, row_id, fact.fact_id, deleted)
+                    store_correction_receipt(db, receipt, fingerprint, current.digest)
+                    return receipt
+        except _Relocated:
+            # A committed move changed the live address before this transaction
+            # took its write lock. Re-resolve and attach the volume now holding it.
+            continue
+    raise RuntimeError('correction target relocated repeatedly')

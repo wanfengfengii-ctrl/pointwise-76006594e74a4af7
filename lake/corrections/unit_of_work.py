@@ -4,7 +4,7 @@ from pathlib import Path
 
 
 def configure_durable(db, schema):
-    if schema not in ('main', 'volume'):
+    if not isinstance(schema, str) or not schema.isidentifier():
         raise ValueError('unsupported database schema')
     mode = db.execute(f'PRAGMA {schema}.journal_mode').fetchone()[0]
     if mode.lower() != 'delete':

@@ -41,9 +41,22 @@ def find_current_row(db, partition_id, row_id):
 
 
 def reserve_row_identity(db, partition_id, row, fact_id):
+    insert_current_row(db, partition_id, row.row_id, row.liters, fact_id)
+
+
+def insert_current_row(db, partition_id, row_id, liters, fact_id):
     db.execute('''
         INSERT INTO current_rows (partition_id, row_id, digest, fact_id) VALUES (?, ?, ?, ?)
-    ''', (partition_id, row.row_id, image_digest(row.liters), fact_id))
+    ''', (partition_id, row_id, image_digest(liters), fact_id))
+
+
+def vacate_current_row(db, current, fact_id):
+    result = db.execute('''
+        UPDATE current_rows SET digest = NULL, fact_id = ?
+        WHERE partition_id = ? AND row_id = ? AND fact_id = ? AND digest IS NOT NULL
+    ''', (fact_id, current.partition_id, current.row_id, current.fact_id))
+    if result.rowcount != 1:
+        raise RuntimeError('current row changed inside its admission transaction')
 
 
 def update_current_row(db, current, replacement_liters, fact_id):

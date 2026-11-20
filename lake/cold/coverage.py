@@ -18,9 +18,9 @@ def read_coverage(db):
     return record[0]
 
 
-def advance_coverage(db, fact_id):
-    result = db.execute('''
-        UPDATE volume.coverage SET fact_id = ? WHERE singleton = 1 AND fact_id < ?
+def advance_coverage(db, fact_id, schema='volume'):
+    result = db.execute(f'''
+        UPDATE {schema}.coverage SET fact_id = ? WHERE singleton = 1 AND fact_id < ?
     ''', (fact_id, fact_id))
     if result.rowcount != 1:
         raise RuntimeError('volume coverage must advance from an existing earlier point')

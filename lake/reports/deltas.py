@@ -26,3 +26,8 @@ def correction_delta(before_liters, after_liters, threshold):
     before_count, before_total = contribution(before_liters, threshold)
     after_count, after_total = contribution(after_liters, threshold)
     return ReportDelta(after_count - before_count, after_total - before_total)
+
+
+def move_deltas(liters, threshold):
+    count, total = contribution(liters, threshold)
+    return ReportDelta(-count, -total), ReportDelta(count, total)

@@ -2,6 +2,7 @@ from lake.cold.checks import check_volume_binding
 from lake.cold.coverage import advance_coverage
 from lake.corrections.commits import confirm_fact
 from lake.corrections.current_rows import find_current_row, reserve_row_identity
+from lake.corrections.origins import store_row_origin
 from lake.corrections.unit_of_work import write_transaction
 from lake.feed.append import append_delta
 from lake.partitions.batch_identity import batch_fingerprint, matches_batch
@@ -49,8 +50,9 @@ def load_batch(warehouse, partition_id, batch_id, rows):
             receipt = IntakeReceipt(batch_id, partition_id, f'intake-{fact.fact_id}', fact.fact_id)
             store_intake_receipt(db, receipt, candidate)
             insert_source_rows(db, batch_id, rows)
-            for row in rows:
+            for ordinal, row in enumerate(rows):
                 reserve_row_identity(db, partition_id, row, fact.fact_id)
+                store_row_origin(db, partition_id, row.row_id, (partition_id, batch_id, ordinal, row.row_id))
             advance_coverage(db, fact.fact_id)
             delta = batch_delta(rows, read_threshold(db))
             apply_delta(db, partition_id, delta)

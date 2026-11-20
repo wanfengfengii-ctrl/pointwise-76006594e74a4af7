@@ -12,10 +12,14 @@ from lake.corrections.receipts import CorrectionReceipt as CorrectionReceipt
 from lake.corrections.warehouse import Warehouse as Warehouse
 from lake.corrections.warehouse import open_warehouse as open_warehouse
 from lake.feed.append import FeedEntry as FeedEntry
+from lake.feed.append import MoveFeedEntry as MoveFeedEntry
 from lake.feed.cursors import START_CURSOR as START_CURSOR
 from lake.feed.cursors import FeedCursor as FeedCursor
 from lake.feed.format import FeedPage as FeedPage
 from lake.feed.read import read_feed as read_feed
+from lake.moves.receipts import MoveReceipt as MoveReceipt
+from lake.moves.transfer import MoveConflict as MoveConflict
+from lake.moves.transfer import move_row as move_row
 from lake.partitions.catalog import BindingConflict as BindingConflict
 from lake.partitions.catalog import PartitionBinding as PartitionBinding
 from lake.partitions.catalog import UnknownPartition as UnknownPartition

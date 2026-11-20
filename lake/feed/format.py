@@ -1,12 +1,12 @@
 from dataclasses import dataclass
 
-from lake.feed.append import FeedEntry
+from lake.feed.append import FeedEntry, MoveFeedEntry
 from lake.feed.cursors import FeedCursor
 
 
 @dataclass(frozen=True, slots=True)
 class FeedPage:
-    entries: tuple[FeedEntry, ...]
+    entries: tuple[FeedEntry | MoveFeedEntry, ...]
     cursor: FeedCursor
 
 

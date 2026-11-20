@@ -2,11 +2,13 @@ from pathlib import Path
 
 from lake.cold.mounts import MountGate
 from lake.cold.volumes import VolumePort
-from lake.corrections.commits import init_commit_log
+from lake.corrections.commits import init_commit_log, migrate_commit_log
 from lake.corrections.current_rows import init_current_rows
+from lake.corrections.origins import init_row_origins
 from lake.corrections.receipts import init_correction_receipts
 from lake.corrections.unit_of_work import open_connection, write_transaction
 from lake.feed.append import init_feed
+from lake.moves.receipts import init_move_receipts
 from lake.partitions.catalog import init_catalog
 from lake.partitions.intake_receipts import init_intake_receipts
 from lake.partitions.source_rows import require_liters
@@ -26,6 +28,7 @@ class Warehouse:
         self.db = open_connection(self.root / 'warehouse.sqlite3')
 
     def initialize(self, threshold=None):
+        migrate_commit_log(self.db)
         with write_transaction(self.db):
             init_threshold(self.db, threshold)
             init_catalog(self.db)
@@ -36,6 +39,8 @@ class Warehouse:
             init_rollups(self.db)
             init_frozen_history(self.db)
             init_feed(self.db)
+            init_row_origins(self.db)
+            init_move_receipts(self.db)
 
     def close(self):
         self.db.close()

@@ -26,15 +26,15 @@ class VolumePort:
                 yield
 
     @contextmanager
-    def attach_volume(self, db, volume_ref, *, create=False):
+    def attach_volume(self, db, volume_ref, *, create=False, alias='volume'):
         mode = 'rwc' if create else 'rw'
         uri = self.path_for(volume_ref).resolve().as_uri() + f'?mode={mode}'
-        db.execute('ATTACH DATABASE ? AS volume', (uri,))
+        db.execute(f'ATTACH DATABASE ? AS {alias}', (uri,))
         try:
-            configure_durable(db, 'volume')
+            configure_durable(db, alias)
             yield
         finally:
-            db.execute('DETACH DATABASE volume')
+            db.execute(f'DETACH DATABASE {alias}')
 
     def initialize_volume(self, db, partition_id, volume_ref):
         db.execute('''
@@ -61,28 +61,28 @@ class VolumePort:
     def open_for_read(self, volume_ref):
         return open_connection(self.path_for(volume_ref), read_only=True)
 
-    def read_current_value(self, db, row_id):
-        record = db.execute('''
+    def read_current_value(self, db, row_id, schema='volume'):
+        record = db.execute(f'''
             SELECT CASE WHEN edit.row_id IS NULL THEN original.liters ELSE edit.liters END
-            FROM volume.source_rows AS original
-            LEFT JOIN volume.row_edits AS edit USING (row_id)
+            FROM {schema}.source_rows AS original
+            LEFT JOIN {schema}.row_edits AS edit USING (row_id)
             WHERE original.row_id = ?
         ''', (row_id,)).fetchone()
         if record is None or record[0] is None:
             return None
         return decode_liters(record[0])
 
-    def _store_edit(self, db, row_id, encoded_liters):
-        db.execute('''
-            INSERT INTO volume.row_edits (row_id, liters) VALUES (?, ?)
+    def _store_edit(self, db, row_id, encoded_liters, schema='volume'):
+        db.execute(f'''
+            INSERT INTO {schema}.row_edits (row_id, liters) VALUES (?, ?)
             ON CONFLICT (row_id) DO UPDATE SET liters = excluded.liters
         ''', (row_id, encoded_liters))
 
-    def replace_current_value(self, db, row_id, replacement_liters):
-        self._store_edit(db, row_id, encode_liters(replacement_liters))
+    def replace_current_value(self, db, row_id, replacement_liters, schema='volume'):
+        self._store_edit(db, row_id, encode_liters(replacement_liters), schema)
 
-    def delete_current_row(self, db, row_id):
-        self._store_edit(db, row_id, None)
+    def delete_current_row(self, db, row_id, schema='volume'):
+        self._store_edit(db, row_id, None, schema)
 
     def iter_visible_rows(self, db):
         records = db.execute('''
